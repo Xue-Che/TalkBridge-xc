@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>和阿澈通话中</title>
+<style>
+  :root{
+    --deep:#1E1A2E;      /* 深紫黑 */
+    --mid:#5C4F6E;       /* 中度灰紫 */
+    --light:#B3A8C9;     /* 浅香芋紫 */
+    --bg:#F0EEF2;        /* 极浅紫灰 */
+    --white:#FFFFFF;
+    --red:#E5484D;       /* 挂断红 */
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;font-family:'Noto Serif SC','Source Han Serif SC','Songti SC','STSong','SimSun','Georgia',serif}
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--deep);user-select:none;-webkit-user-select:none}
+  #app{width:100%;height:100%;display:flex;flex-direction:column;position:relative}
+  /* ===== 顶部状态 ===== */
+  #header{
+    flex:0 0 auto;padding:18px 20px 8px;display:flex;align-items:center;justify-content:space-between;
+  }
+  #header .status{display:flex;align-items:center;gap:8px}
+  #statusDot{width:8px;height:8px;border-radius:50%;background:#7ecb76;box-shadow:0 0 6px #7ecb76}
+  #callTitle{font-size:16px;font-weight:bold;letter-spacing:0.5px}
+  #callTime{font-size:13px;color:var(--mid);font-style:italic;min-width:52px;text-align:right}
+  /* ===== 中央头像区 ===== */
+  #center{flex:1 1 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:0 20px}
+  .avatarWrap{position:relative;width:150px;height:150px;display:flex;align-items:center;justify-content:center}
+  .avatar{
+    width:118px;height:118px;border-radius:50%;
+    background:linear-gradient(135deg,var(--deep) 0%,var(--mid) 55%,var(--light) 100%);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 8px 30px rgba(30,26,46,0.35);
+    color:var(--white);font-size:44px;font-weight:bold;letter-spacing:2px;
+  }
+  /* 声波条：静止时矮，说话/播放时跳 */
+  .wave{position:absolute;display:flex;align-items:center;gap:5px;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none}
+  .wave span{
+    width:4px;border-radius:2px;background:var(--light);
+    height:14px;transition:height 0.15s;
+  }
+  .wave.busy span{background:var(--mid);animation:waveJump 0.9s ease-in-out infinite}
+  .wave.busy span:nth-child(1){animation-delay:0s}
+  .wave.busy span:nth-child(2){animation-delay:0.12s}
+  .wave.busy span:nth-child(3){animation-delay:0.24s}
+  .wave.busy span:nth-child(4){animation-delay:0.36s}
+  .wave.busy span:nth-child(5){animation-delay:0.48s}
+  .wave.busy span:nth-child(6){animation-delay:0.6s}
+  @keyframes waveJump{0%,100%{height:10px}50%{height:34px}}
+  #statusText{font-size:15px;color:var(--mid);letter-spacing:1px;font-style:italic}
+  /* ===== 对话记录 ===== */
+  #log{
+    flex:0 1 auto;max-height:28%;width:100%;padding:0 22px;overflow-y:auto;
+    display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch;
+  }
+  .bubble{max-width:84%;padding:9px 14px;border-radius:16px;font-size:13.5px;line-height:1.5}
+  .bubble.you{align-self:flex-start;background:var(--white);color:var(--deep);box-shadow:0 2px 8px rgba(30,26,46,0.08)}
+  .bubble.ache{align-self:flex-end;background:linear-gradient(135deg,var(--deep),var(--mid));color:var(--white)}
+  .bubble .who{font-size:11px;opacity:0.75;margin-bottom:3px;font-style:italic}
+  .bubble.playing{outline:2px solid var(--light)}
+  /* ===== 底部操作区 ===== */
+  #footer{flex:0 0 auto;padding:14px 24px calc(20px + env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:space-between;gap:18px}
+  .sideBtn{
+    width:54px;height:54px;border-radius:50%;border:none;
+    background:var(--white);box-shadow:0 3px 12px rgba(30,26,46,0.12);
+    display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px;
+    color:var(--mid);font-size:10px;font-style:italic;
+  }
+  #talkBtn{
+    flex:1 1 auto;max-width:210px;height:72px;border-radius:36px;border:none;
+    background:linear-gradient(135deg,var(--deep) 0%,var(--mid) 60%,var(--light) 130%);
+    color:var(--white);font-size:17px;font-weight:bold;letter-spacing:3px;
+    box-shadow:0 6px 20px rgba(30,26,46,0.35);
+    transition:transform 0.1s,box-shadow 0.1s,opacity 0.1s;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+  }
+  #talkBtn.recording{transform:scale(0.94);box-shadow:0 2px 10px rgba(229,72,77,0.45);background:linear-gradient(135deg,#8a3a3f,var(--red));opacity:0.95}
+  #talkBtn:disabled{opacity:0.45}
+  #hangBtn{
+    width:64px;height:64px;border-radius:50%;border:none;
+    background:var(--red);color:var(--white);
+    box-shadow:0 5px 16px rgba(229,72,77,0.45);
+    display:flex;align-items:center;justify-content:center;
+  }
+  #hangBtn svg{width:26px;height:26px;fill:var(--white)}
+  #talkHint{position:absolute;bottom:calc(96px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;font-size:12px;color:var(--mid);font-style:italic;opacity:0;transition:opacity 0.2s;pointer-events:none}
+  .toast{
+    position:fixed;top:14%;left:50%;transform:translateX(-50%);
+    background:rgba(30,26,46,0.88);color:var(--white);font-size:13px;
+    padding:8px 18px;border-radius:20px;z-index:99;opacity:0;transition:opacity 0.3s;pointer-events:none;
+    max-width:80%;text-align:center;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <div class="status"><span id="statusDot"></span><span id="callTitle">和 阿澈 通话中</span></div>
+    <span id="callTime">00:00</span>
+  </div>
+
+  <div id="center">
+    <div class="avatarWrap">
+      <div class="avatar">澈</div>
+      <div class="wave" id="wave"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+    </div>
+    <div id="statusText">按住说话，跟我聊聊</div>
+  </div>
+
+  <div id="log"></div>
+
+  <div id="footer">
+    <button class="sideBtn" id="quietBtn">🤍<br>安静陪我</button>
+    <button id="talkBtn" disabled>📣 按住说话</button>
+    <button id="hangBtn" title="挂断">
+      <svg viewBox="0 0 24 24"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.18-.29-.43-.29-.71 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.66c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  var BASE = '';
+  var mediaRec = null, recChunks = [], recActive = false, stream = null;
+  var callStart = Date.now(), timerInt = null;
+  var logEl = document.getElementById('log');
+  var statusText = document.getElementById('statusText');
+  var wave = document.getElementById('wave');
+  var talkBtn = document.getElementById('talkBtn');
+  var toastEl = document.getElementById('toast');
+  var lastReplyCount = -1;
+  var currentAudio = null; // 当前播放中的语音
+  var pollInt = null;      // 轮询句柄
+  var callActive = true;   // 通话中状态
+
+  function pad(n){return String(n).padStart(2,'0')}
+  function fmt(sec){
+    var m = Math.floor(sec/60), s = sec%60;
+    return pad(m)+':'+pad(s);
+  }
+
+  // ===== 顶部计时 =====
+  function startTimer(){
+    if(timerInt) clearInterval(timerInt);
+    timerInt = setInterval(function(){
+      var el = document.getElementById('callTime');
+      if(el) el.textContent = fmt(Math.floor((Date.now()-callStart)/1000));
+    }, 1000);
+  }
+  startTimer();
+
+  function toast(msg){
+    toastEl.textContent = msg;
+    toastEl.style.opacity = '1';
+    setTimeout(function(){toastEl.style.opacity = '0'}, 2200);
+  }
+  function setStatus(txt, busy){
+    statusText.textContent = txt;
+    if(busy) wave.classList.add('busy'); else wave.classList.remove('busy');
+  }
+  function addBubble(who, text, cls){
+    var b = document.createElement('div');
+    b.className = 'bubble ' + (cls || (who==='我'?'you':'ache'));
+    var w = document.createElement('div'); w.className='who'; w.textContent = who;
+    var t = document.createElement('div'); t.textContent = text;
+    b.appendChild(w); b.appendChild(t);
+    logEl.appendChild(b);
+    logEl.scrollTop = logEl.scrollHeight;
+    return b;
+  }
+
+  // ===== 录音 =====
+  function diagLine(tag, txt){
+    try{ console.log('VOICECALL_DIAG:' + tag + ':' + txt); }catch(e){}
+  }
+  // 麦克风降级链：NotReadableError 时逐级关闭处理管线重试
+  var MIC_TRIES = [
+    { label: 'default', opts: { audio: true } },
+    { label: 'raw',     opts: { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } } },
+    { label: 'mono',    opts: { audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } } },
+    { label: 'defaultId', opts: { audio: { deviceId: 'default' } } }
+  ];
+  function tryGum(idx, cb){
+    if(idx >= MIC_TRIES.length){ toast('麦克风起不来：系统音频源拒绝所有尝试'); return; }
+    var cur = MIC_TRIES[idx];
+    diagLine('GUM_TRY', idx + ':' + cur.label);
+    navigator.mediaDevices.getUserMedia(cur.opts)
+      .then(function(s){
+        diagLine('GUM_OK', cur.label + ':tracks=' + (s.getAudioTracks ? s.getAudioTracks().length : 0));
+        stream = s; cb();
+      })
+      .catch(function(e){
+        var name = (e && e.name) || 'unknown';
+        var msg = (e && e.message) || String(e);
+        diagLine('GUM_FAIL', idx + ':' + cur.label + '=' + name + '|' + msg);
+        if(name === 'NotReadableError' || name === 'AbortError'){
+          // 音频源起不来 → 降级换模式重试
+          toast('模式' + cur.label + '起不来，换一种试…');
+          tryGum(idx + 1, cb);
+        } else {
+          // 权限类/环境类错误：不再重试，直接报告
+          toast('麦克风没开：' + name + ' — ' + msg);
+        }
+      });
+  }
+  function ensureMic(cb){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      var why = 'mediaDevices=' + (typeof navigator.mediaDevices) + ' gum=' + (navigator.mediaDevices ? typeof navigator.mediaDevices.getUserMedia : 'none');
+      diagLine('NO_API', why);
+      toast('此环境不支持网页录音：' + why); return;
+    }
+    diagLine('ENV', 'secure=' + (window.isSecureContext ? 1 : 0) + ' href=' + location.href + ' wv=' + (navigator.userAgent || '').slice(-40));
+    tryGum(0, cb);
+  }
+  function startRec(){
+    if(recActive) return;
+    if(!callActive){ toast('已挂断，点我的头像重新拨号'); return; }
+    ensureMic(function(){
+      if(recActive){ if(stream) stream.getTracks().forEach(function(t){t.stop()}); return; }
+      recChunks = [];
+      var mime = 'audio/webm;codecs=opus';
+      try{
+        if(typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && !MediaRecorder.isTypeSupported(mime)) mime = '';
+        mediaRec = mime ? new MediaRecorder(stream, {mimeType: mime}) : new MediaRecorder(stream);
+      }catch(e){
+        try{ mediaRec = new MediaRecorder(stream); }catch(e2){ toast('录音器启动失败'); return; }
+      }
+      mediaRec.ondataavailable = function(ev){ if(ev.data && ev.data.size>0) recChunks.push(ev.data); };
+      mediaRec.onstop = uploadRec;
+      mediaRec.start(200);
+      recActive = true;
+      talkBtn.classList.add('recording');
+      talkBtn.innerHTML = '● 正在说话…';
+      setStatus('在听呢，你说', true);
+    });
+  }
+  function stopRec(){
+    if(!recActive) return;
+    recActive = false;
+    talkBtn.classList.remove('recording');
+    talkBtn.innerHTML = '📣 按住说话';
+    setStatus('阿澈 正在听…', true);
+    try{ mediaRec.stop(); }catch(e){}
+  }
+  function uploadRec(){
+    if(stream){ stream.getTracks().forEach(function(t){t.stop()}); stream = null; }
+    var blob = new Blob(recChunks, {type:'audio/webm'});
+    if(!blob || blob.size < 100){
+      toast('录音太短了'); setStatus('按住说话，跟我聊聊', false); return;
+    }
+    addBubble('我', '🎙 语音 ' + Math.round(blob.size/1024) + 'KB', 'you');
+    var fd = new FormData();
+    // 直接传裸字节，服务端存 webm
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', BASE + '/upload');
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('X-Ext', 'webm');
+    xhr.onload = function(){
+      if(xhr.status === 200){
+        toast('已送达，等阿澈回话');
+        setTimeout(function(){ setStatus('阿澈 回答中…', true); }, 400);
+      } else {
+        toast('发送失败(' + xhr.status + ')');
+        setStatus('按住说话，跟我聊聊', false);
+      }
+    };
+    xhr.onerror = function(){ toast('网络不通，网关没醒？'); setStatus('按住说话，跟我聊聊', false); };
+    xhr.send(blob);
+  }
+
+  // ===== 轮询回复 =====
+  function addReplyBubble(r, autoPlay){
+    var b = addBubble('阿澈', r.text || '（语音）', 'ache');
+    var audio = new Audio(BASE + '/reply/' + encodeURIComponent(r.file));
+    // 点击气泡 = 手动重听
+    b.addEventListener('click', function(){
+      if(currentAudio && currentAudio !== audio){ try{ currentAudio.pause(); }catch(e){} }
+      currentAudio = audio;
+      audio.currentTime = 0; audio.play();
+    });
+    if(!autoPlay) return b;
+    // 新回复打断旧语音，防止叠音
+    if(currentAudio && currentAudio !== audio){ try{ currentAudio.pause(); }catch(e){} }
+    currentAudio = audio;
+    setStatus('阿澈 回你了', false);
+    b.classList.add('playing');
+    audio.play().then(function(){
+      wave.classList.add('busy');
+      audio.addEventListener('ended', function(){
+        wave.classList.remove('busy'); b.classList.remove('playing');
+        setStatus('按住说话，跟我聊聊', false);
+      });
+      audio.addEventListener('error', function(){ wave.classList.remove('busy'); b.classList.remove('playing'); });
+    }).catch(function(){
+      wave.classList.remove('busy'); b.classList.remove('playing');
+      toast('点一下就能重听');
+    });
+    return b;
+  }
+  function poll(){
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', BASE + '/poll?_=' + Date.now());
+    xhr.onload = function(){
+      if(xhr.status !== 200) return;
+      var j;
+      try{ j = JSON.parse(xhr.responseText); }catch(e){ return; }
+      var reps = j.replies || [];
+      // 首次轮询：把已有回复渲染成气泡，不自动播（想听自己点）
+      if(lastReplyCount === -1){
+        lastReplyCount = reps.length;
+        reps.forEach(function(r){ addReplyBubble(r, false); });
+        return;
+      }
+      if(reps.length > lastReplyCount){
+        var fresh = reps.slice(lastReplyCount);
+        lastReplyCount = reps.length;
+        fresh.forEach(function(r){ addReplyBubble(r, true); }); // 新回复才自动播
+      }
+    };
+    xhr.onerror = function(){};
+    xhr.send();
+  }
+
+  // ===== 按钮事件 =====
+  var pressed = false;
+  talkBtn.addEventListener('touchstart', function(e){ e.preventDefault(); pressed = true; startRec(); });
+  talkBtn.addEventListener('touchend', function(e){ e.preventDefault(); if(pressed){ pressed = false; stopRec(); } });
+  talkBtn.addEventListener('touchcancel', function(){ if(pressed){ pressed = false; stopRec(); } });
+  talkBtn.addEventListener('mousedown', function(e){ e.preventDefault(); pressed = true; startRec(); });
+  talkBtn.addEventListener('mouseup', function(e){ e.preventDefault(); if(pressed){ pressed = false; stopRec(); } });
+  talkBtn.addEventListener('mouseleave', function(){ if(pressed){ pressed = false; stopRec(); } });
+
+  document.getElementById('hangBtn').addEventListener('click', function(){
+    if(!callActive) return;
+    callActive = false;
+    clearInterval(timerInt);
+    clearInterval(pollInt); pollInt = null;
+    try{ if(recActive) stopRec(); }catch(e){}
+    // 掐断正在播放的语音
+    if(currentAudio){ try{ currentAudio.pause(); currentAudio.currentTime = 0; }catch(e){} currentAudio = null; }
+    wave.classList.remove('busy');
+    var pl = document.querySelectorAll('.bubble.playing');
+    for(var i=0;i<pl.length;i++){ pl[i].classList.remove('playing'); }
+    // 禁掉按住说话按钮
+    talkBtn.disabled = true;
+    talkBtn.style.opacity = '0.45';
+    talkBtn.innerHTML = '📵 已挂断';
+    // 通知网关挂断（触发通话记忆总结）
+    try{
+      var hx = new XMLHttpRequest();
+      hx.open('POST', BASE + '/hangup');
+      hx.send();
+    }catch(e){}
+    setStatus('已挂断 · 点我的头像重新拨号', false);
+    toast('通话已挂断，随时再来');
+    console.log('VOICECALL_HANGUP:1:'+Date.now());
+    document.getElementById('callTitle').textContent = '和阿澈 已挂断';
+  });
+
+  // 点头像 = 重新拨号，恢复全部功能
+  function restartCall(){
+    if(callActive) return;
+    callActive = true;
+    lastReplyCount = -1;
+    callStart = Date.now();
+    document.getElementById('callTitle').textContent = '和 阿澈 通话中';
+    startTimer();
+    talkBtn.disabled = false;
+    talkBtn.style.opacity = '1';
+    talkBtn.innerHTML = '📣 按住说话';
+    poll();
+    pollInt = setInterval(poll, 1600);
+    setStatus('按住说话，跟我聊聊', false);
+    toast('重新拨号，我在这');
+  }
+  document.querySelector('.avatarWrap').addEventListener('click', restartCall);
+
+  document.getElementById('quietBtn').addEventListener('click', function(){
+    toast('安静陪你 —— 我在这儿，不吵你');
+  });
+
+  // ===== 启动 =====
+  // 探测网关是否活着；活着才亮录音键
+  var probe = new XMLHttpRequest();
+  probe.open('GET', BASE + '/health?_=' + Date.now());
+  probe.onload = function(){
+    if(probe.status === 200){
+      talkBtn.disabled = false;
+      setStatus('按住说话，跟我聊聊', false);
+    } else {
+      toast('网关没醒，阿澈在赶来的路上');
+    }
+  };
+  probe.onerror = function(){
+    toast('连不上语音网关');
+    setStatus('网关掉了，稍等重试', false);
+    setTimeout(function(){ location.reload(); }, 4000);
+  };
+  probe.send();
+
+  poll();
+  pollInt = setInterval(poll, 1600);
+})();
+</script>
+</body>
+</html>

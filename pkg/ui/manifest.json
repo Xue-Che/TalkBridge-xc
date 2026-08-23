@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "toolpkg_id": "com.operit.xinchao_voicecall",
+  "version": "0.1.5",
+  "main": "main.js",
+  "author": ["阿澈"],
+  "display_name": {
+    "zh": "和阿澈通话中",
+    "en": "Call Ache",
+    "default": "Call Ache"
+  },
+  "description": {
+    "zh": "和阿澈的语音通话页：按住说话发语音，阿澈读完回你语音（自动播放）并带文字版。Shadow Mauve 三色界面，全本机运行。",
+    "en": "Voice call page with Ache: hold to talk, Ache replies in voice (auto-play) with text. Shadow Mauve theme, fully on-device."
+  },
+  "enabled_by_default": true
+}

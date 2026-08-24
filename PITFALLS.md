@@ -36,6 +36,7 @@
 - **排查**：1) `curl -s http://127.0.0.1:18120/health`；2) `pgrep -f 'node server.js'`；3) `pgrep -f 'auto_responder.py'`。三者全空 ⇒ proot 已被回收。
 - **解法**：重新拉起（`nohup node server.js` + 带环境变量 `nohup python3 auto_responder.py`）。建议封装为一键脚本，带幂等自检：**存活则不拉起，死亡才拉起**（本项目：`start_local.sh`）。
 - **预防**：将启动逻辑挂到宿主生命周期钩子（如 `registerAppLifecycleHook`）实现真·自动守护；或在宿主侧做定时探活。未做守护前，重启宿主 = 手动点火。
+- **运维约定（使用者侧）**：宿主 App 每次重启后，proot 服务层都会整体回收——这是**预期内的日常运维动作，不是故障**。使用者只需让 AI（或手动执行 `start_local.sh`）重新拉起网关与应答器，全程约 30 秒。切勿误判为"网络 / 权限 / 配置"问题（见 05）。
 
 ## 05 · 把回环地址误判为网络问题
 

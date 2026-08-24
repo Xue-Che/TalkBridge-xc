@@ -1,5 +1,5 @@
 /*
- * 和阿澈通话中 — ToolPkg 入口
+ * TalkBridge-xc语音电话 — ToolPkg 入口
  * 注册侧边栏通话页路由；页面主体是 WebView 加载语音网关托管的 /phone
  */
 var __importDefault = function (mod) {
@@ -15,7 +15,7 @@ function registerToolPkg() {
         screen: Screen,
         params: {},
         title: {
-            zh: "和阿澈通话中",
+            zh: "TalkBridge-xc语音电话",
             en: "Call Ache",
         }
     });
@@ -24,7 +24,7 @@ function registerToolPkg() {
         route: "toolpkg:com.operit.xinchao_voicecall:ui:xinchao_voicecall",
         surface: "main_sidebar_plugins",
         title: {
-            zh: "和阿澈通话中",
+            zh: "TalkBridge-xc语音电话",
             en: "Call Ache",
         },
         icon: "call",

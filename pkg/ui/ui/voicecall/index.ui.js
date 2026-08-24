@@ -1,4 +1,4 @@
-// 和阿澈通话中 — 通话页 DSL
+// TalkBridge-xc语音电话 — 通话页 DSL
 // 主体：全屏 WebView 加载语音网关托管的 /phone 页面（三色 Shadow Mauve）
 // 顶栏：网关状态灯 + 刷新 + 挂断状态
 
@@ -67,7 +67,7 @@ async function Screen(ctx) {
 
   const icon = gw.value === "up" ? "phone_in_talk" : "phone_disabled";
   const iconTint = gw.value === "up" ? PALETTE.green : PALETTE.red;
-  const title = hang.value ? "和阿澈 已挂断" : "和阿澈通话中";
+  const title = hang.value ? "TalkBridge-xc 已挂断" : "TalkBridge-xc语音电话";
 
   const children = [];
 

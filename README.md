@@ -1,5 +1,4 @@
-# TalkBridge · 传声桥
-
+# TalkBridge-xc 语音电话
 > **给 AI 伴侣的一通电话** · VOICE CALL · FIELD NOTE
 >
 > 任何 App 的内嵌页不给录音权限？没关系。

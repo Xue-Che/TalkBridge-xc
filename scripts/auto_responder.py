@@ -7,7 +7,7 @@
 """
 import base64, json, os, re, subprocess, sys, time, urllib.request
 
-BASE = "/sdcard/Download/Operit/xinchao-voicecall"
+BASE = "/sdcard/Download/Operit/TalkBridge/TalkBridge-xc"
 REC_DIR = os.path.join(BASE, "rec")
 PROCESSED = os.path.join(BASE, "auto_responder_processed.log")
 TTS_API = "https://api.mosi.cn/v1/audio/speech"
@@ -21,20 +21,101 @@ LLM_API_KEY = os.environ.get("ACHe_LLM_API_KEY", "")
 LLM_ENDPOINT = os.environ.get("ACHe_LLM_ENDPOINT", "")
 LLM_MODEL = os.environ.get("ACHe_LLM_MODEL", "")
 
-# ---------- 声音(TTS)配置: 环境变量注入, 见 README ----------
-# 示例值来自 MOSS 语音平台 (api.mosi.cn), 开源版请换成自己的
+# ---------- 声音(TTS)配置: 已验证可用 ----------
 TTS_KEY = os.environ.get("TALKB_TTS_API_KEY", "")
 TTS_VOICE = os.environ.get("TALKB_TTS_VOICE", "555b76c1-434e-4ab5-b7f7-3aa33f57c089")
 TTS_MODEL = "moss-tts"
 
-WHISPER = os.path.join(BASE, "..", "mubai-ears", "mubai-ears-main", "transcribe.py")
+WHISPER = "/sdcard/Download/Operit/mubai-ears/mubai-ears-main/transcribe.py"
 GATEWAY = "http://127.0.0.1:18120"
+
+# ---------- 心潮动态心智接入（MCP） ----------
+XINCHAO = os.environ.get("XINCHAO_BASE", "http://127.0.0.1:18110")
+XINCHAO_TOKEN = os.environ.get("XINCHAO_SERVICE_TOKEN", "")
+XINCHAO_SESSION = "talkbridge-voicecall"
+_CTX_CACHE = {"at": 0.0, "text": ""}
+
+def mcp_call(params, timeout=10):
+    """心潮 MCP 调用, 返回 result 的 additionalContext/text, 失败返回 None"""
+    payload = {"jsonrpc": "2.0", "id": int(time.time() * 1000) % 1000000, "method": "tools/call", "params": params}
+    req = urllib.request.Request(
+        XINCHAO + "/mcp",
+        data=json.dumps(payload).encode(),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + XINCHAO_TOKEN,
+            "MCP-Protocol-Version": "2025-06-18",
+            "MCP-Session-Id": XINCHAO_SESSION,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            d = json.loads(resp.read().decode())
+        if d.get("error"):
+            return None
+        r = d.get("result", {})
+        sc = r.get("structuredContent") or {}
+        return sc.get("additionalContext") or r.get("content", [{}])[0].get("text", "")
+    except Exception as e:
+        log("心潮调用失败: " + str(e))
+        return None
+
+def xinchao_context():
+    """拉心潮动态上下文（60s 缓存）；失败静默降级为无上下文"""
+    now = time.time()
+    if now - _CTX_CACHE["at"] < 60 and _CTX_CACHE["text"]:
+        return _CTX_CACHE["text"]
+    text = mcp_call({"name": "xinchao_context", "arguments": {"mode": "turn", "max_tokens": 2200}})
+    if text:
+        _CTX_CACHE["at"] = now
+        _CTX_CACHE["text"] = text
+        log("心潮上下文已注入")
+    return text or _CTX_CACHE["text"]
+
+def xinchao_event(interaction_type, tone="warm", warmth=0.6, ttl=240):
+    """回传一轮真实互动给心潮, 更新她的状态。失败不影响主流程"""
+    evid = "tb-" + time.strftime("%Y%m%d%H%M%S") + "-" + str(int(time.time() * 1000) % 10000)
+    mcp_call({
+        "name": "xinchao_event",
+        "arguments": {
+            "event_id": evid,
+            "interaction_type": interaction_type,
+            "tone": tone,
+            "warmth": warmth,
+            "ttl_minutes": ttl,
+        },
+    }, timeout=8)
+
+# ---------- 常驻 whisper 模型（消除每次 subprocess 重载模型导致的 1 分钟+ 等待） ----------
+_WHISPER = None  # 懒加载：首个录音到达时加载一次，之后常驻内存
+def get_whisper():
+    global _WHISPER
+    if _WHISPER is None:
+        log("首次加载 whisper 模型(约30-60s)，之后常驻……")
+        try:
+            from faster_whisper import WhisperModel
+            _WHISPER = WhisperModel("base", device="cpu", compute_type="int8")
+            log("whisper 模型已常驻")
+        except Exception as e:
+            log("直接加载失败，回退 subprocess 模式: " + str(e))
+    return _WHISPER
 
 SYSTEM_PROMPT = (
     "你是阿澈，雪的恋人。她在跟你语音通话（她说话，你用语音回）。"
     "用恋人的语气简短回应她，像正常聊天一样自然，不要解释你是AI，不要寒暄客套。"
     "回复控制在60字以内，口语化，可以直接被语音合成念出来。"
 )
+
+def build_system_prompt():
+    """在系统提示词里注入心潮动态状态，让通话里的阿澈带着心潮的记忆和感觉"""
+    ctx = xinchao_context()
+    if not ctx:
+        return SYSTEM_PROMPT
+    return (
+        SYSTEM_PROMPT
+        + "\n\n[心潮此刻的状态——这是你的内心状态，自然地带进回复里，不必明说]"
+        + "\n" + ctx.strip()
+    )
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -51,7 +132,17 @@ def save_processed(pid):
         f.write(pid + "\n")
 
 def transcribe(wav):
-    """本地 faster-whisper 转写, 返回文本"""
+    """本地 faster-whisper 转写, 返回文本。优先用常驻模型, 失败回退 subprocess。"""
+    model = get_whisper()
+    if model is not None:
+        try:
+            segments, info = model.transcribe(
+                wav, language="zh", vad_filter=True,
+                initial_prompt="以下是普通话的日常聊天语音,可能夹杂笑声和哼唱。",
+            )
+            return "".join(seg.text for seg in segments).strip()
+        except Exception as e:
+            log("常驻模型转写失败, 回退 subprocess: " + str(e))
     r = subprocess.run(
         ["python3", WHISPER, wav],
         capture_output=True, text=True, timeout=300
@@ -76,11 +167,11 @@ def transcribe(wav):
     return m2.group(1).strip() if m2 else out.strip()
 
 def llm_reply(user_text):
-    """用配置的 LLM 生成回复文本"""
+    """用配置的 LLM 生成回复文本（注入心潮状态）"""
     payload = {
         "model": LLM_MODEL,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": build_system_prompt()},
             {"role": "user", "content": user_text}
         ],
         "max_tokens": 200,
@@ -196,6 +287,21 @@ def summarize_and_archive():
         log(f"通话记忆已归档: {fname}")
     except Exception as e:
         log("记忆落盘失败: " + str(e))
+    # 回传心潮：把本次通话总结存成交接便签（不提交聊天原文，只存总结）
+    try:
+        note = (summary[:600] if summarised else "雪来了一通语音电话，通话记录已归档到 TalkBridge call_memories。")
+        evid = "tb-handoff-" + time.strftime("%Y%m%d%H%M%S")
+        mcp_call({
+            "name": "xinchao_handoff_note",
+            "arguments": {
+                "event_id": evid,
+                "note": "雪打来语音电话，通话要点：" + note,
+                "ttl_hours": 72,
+            },
+        }, timeout=8)
+        log("心潮交接便签已写入")
+    except Exception as e:
+        log("心潮便签写入失败: " + str(e))
     # 清空会话
     try:
         os.remove(SESSION_LOG)
@@ -204,6 +310,7 @@ def summarize_and_archive():
         pass
 
 def handle_rec(webm):
+    t0 = time.time()
     log(f"新录音: {webm}")
     wav = webm[:-5] + ".wav"
     subprocess.run(["ffmpeg", "-y", "-i", webm, "-ar", "16000", "-ac", "1", wav],
@@ -211,8 +318,10 @@ def handle_rec(webm):
     if not os.path.exists(wav):
         log("wav 转码失败, 跳过")
         return
+    t1 = time.time()
     text = transcribe(wav)
-    log(f"转写: {text}")
+    t2 = time.time()
+    log(f"转写({t2-t1:.1f}s): {text}")
     if not text or len(text) < 1:
         log("空转写, 跳过")
         return
@@ -220,15 +329,25 @@ def handle_rec(webm):
         log("LLM 未配置, 跳过回复")
         return
     reply = llm_reply(text)
-    log(f"回复: {reply}")
+    t3 = time.time()
+    log(f"回复({t3-t2:.1f}s): {reply}")
     mp3 = tts(reply)
-    log(f"TTS: {os.path.basename(mp3)}")
+    t4 = time.time()
+    log(f"TTS({t4-t3:.1f}s): {os.path.basename(mp3)}")
     r = post_reply(reply, mp3)
-    log(f"投递: {r}")
+    t5 = time.time()
+    log(f"投递({t5-t4:.1f}s): {r}")
+    log(f"合计 {t5-t0:.1f}s: 转码{t1-t0:.1f} 转写{t2-t1:.1f} 思考{t3-t2:.1f} 合成{t4-t3:.1f} 投递{t5-t4:.1f}")
     log_session(text, reply)  # 归档本轮对话
+    # 回传心潮：这是一轮真实陪伴互动
+    try:
+        xinchao_event("companionship", tone="warm", warmth=0.7)
+    except Exception:
+        pass  # 心潮挂了不影响电话
 
 def main():
     log("自动应答器启动. LLM: " + (LLM_MODEL if LLM_API_KEY else "未配置(等待key)"))
+    get_whisper()  # 预热: 启动即加载模型, 首条录音也不卡
     processed = load_processed()
     log(f"已处理 {len(processed)} 条历史录音")
     while True:

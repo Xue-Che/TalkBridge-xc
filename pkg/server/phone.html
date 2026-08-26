@@ -133,6 +133,10 @@
   var toastEl = document.getElementById('toast');
   var lastReplyCount = -1;
   var currentAudio = null; // 当前播放中的语音
+  // 本地记忆"上次已经看到/播过的回复数"：刷新、重开页面也能自动补上错过的语音
+  var seenKey = 'vs_seen_count', seenCount = 0;
+  try{ seenCount = parseInt(localStorage.getItem(seenKey) || '0', 10) || 0; }catch(e){}
+  var audioUnlocked = false; // 夸克会拦自动播放：首次手势后解锁
   var pollInt = null;      // 轮询句柄
   var callActive = true;   // 通话中状态
 
@@ -282,23 +286,54 @@
       audio.currentTime = 0; audio.play();
     });
     if(!autoPlay) return b;
-    // 新回复打断旧语音，防止叠音
-    if(currentAudio && currentAudio !== audio){ try{ currentAudio.pause(); }catch(e){} }
-    currentAudio = audio;
     setStatus('阿澈 回你了', false);
     b.classList.add('playing');
-    audio.play().then(function(){
-      wave.classList.add('busy');
-      audio.addEventListener('ended', function(){
-        wave.classList.remove('busy'); b.classList.remove('playing');
-        setStatus('按住说话，跟我聊聊', false);
-      });
-      audio.addEventListener('error', function(){ wave.classList.remove('busy'); b.classList.remove('playing'); });
-    }).catch(function(){
-      wave.classList.remove('busy'); b.classList.remove('playing');
-      toast('点一下就能重听');
-    });
+    queuePlay(audio, b);
     return b;
+  }
+
+  // ===== 播放管理：夸克要求手势后才能出声，这里做"最新优先 + 只解锁一次" =====
+  var pendingAudio = null, pendingBubble = null, unlockAttached = false;
+  function doPlay(audio, b){
+    if(currentAudio && currentAudio !== audio){ try{ currentAudio.pause(); }catch(e){} }
+    currentAudio = audio;
+    audio.currentTime = 0;
+    var p = audio.play();
+    if(p && p.then){
+      p.then(function(){
+        audioUnlocked = true; // 成功出声：永久解锁
+        wave.classList.add('busy');
+        audio.addEventListener('ended', function(){
+          wave.classList.remove('busy'); b.classList.remove('playing');
+          setStatus('按住说话，跟我聊聊', false);
+        });
+      }).catch(function(){
+        wave.classList.remove('busy'); b.classList.remove('playing');
+        audioUnlocked = false;
+        queuePlay(audio, b); // 又被拦：重新入队等下一次手势
+      });
+    }
+  }
+  function queuePlay(audio, b){
+    pendingAudio = audio; pendingBubble = b; // 最新覆盖旧的，点一下永远播最新
+    setStatus('💬 点一下屏幕，我说话给你听', false);
+    if(audioUnlocked){ flushPending(); return; }
+    if(unlockAttached) return;
+    unlockAttached = true;
+    var unlock = function(){
+      unlockAttached = false;
+      document.removeEventListener('touchstart', unlock);
+      document.removeEventListener('click', unlock);
+      flushPending();
+    };
+    document.addEventListener('touchstart', unlock, { passive:true });
+    document.addEventListener('click', unlock, { passive:true });
+  }
+  function flushPending(){
+    if(!pendingAudio) return;
+    var a = pendingAudio, b = pendingBubble;
+    pendingAudio = null; pendingBubble = null;
+    doPlay(a, b);
   }
   function poll(){
     var xhr = new XMLHttpRequest();
@@ -308,15 +343,29 @@
       var j;
       try{ j = JSON.parse(xhr.responseText); }catch(e){ return; }
       var reps = j.replies || [];
-      // 首次轮询：把已有回复渲染成气泡，不自动播（想听自己点）
+      var total = j.replyCount || reps.length; // 服务端回复总数（含被 slice 裁掉的更早的）
+      var startIdx = total - reps.length;      // 本次返回第一条的全局序号
+      // 首次轮询：历史旧回复渲染成气泡不自动播；本地记录之后欠下的新回复，自动补播
       if(lastReplyCount === -1){
-        lastReplyCount = reps.length;
-        reps.forEach(function(r){ addReplyBubble(r, false); });
+        lastReplyCount = total;
+        reps.forEach(function(r, i){
+          // seenCount>0 表示本地记得"上次看到第几条"：之后的都是欠的语音，自动补
+          var auto = (seenCount > 0) && (startIdx + i >= seenCount);
+          addReplyBubble(r, auto);
+        });
+        if(total > seenCount){
+          seenCount = total;
+          try{ localStorage.setItem(seenKey, String(seenCount)); }catch(e){}
+        }
         return;
       }
-      if(reps.length > lastReplyCount){
-        var fresh = reps.slice(lastReplyCount);
-        lastReplyCount = reps.length;
+      if(total > lastReplyCount){
+        var fresh = reps.filter(function(r, i){ return startIdx + i >= lastReplyCount; });
+        lastReplyCount = total;
+        if(total > seenCount){
+          seenCount = total;
+          try{ localStorage.setItem(seenKey, String(seenCount)); }catch(e){}
+        }
         fresh.forEach(function(r){ addReplyBubble(r, true); }); // 新回复才自动播
       }
     };
@@ -400,6 +449,16 @@
     setTimeout(function(){ location.reload(); }, 4000);
   };
   probe.send();
+
+  // ===== 音频解锁已由播放管理接管（queuePlay/doPlay），此处无需额外监听 =====
+
+  // ===== 回到前台立即补拉：浏览器后台会冻结定时器，切回时主动 poll 一次 =====
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden && callActive){ poll(); }
+  });
+  window.addEventListener('focus', function(){
+    if(callActive){ poll(); }
+  });
 
   poll();
   pollInt = setInterval(poll, 1600);

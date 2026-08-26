@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 
 const PORT = Number(process.env.VOICEGATE_PORT || 18120);
-const ROOT = process.env.VOICEGATE_ROOT || "/sdcard/Download/Operit/xinchao-voicecall";
+const ROOT = process.env.VOICEGATE_ROOT || "/sdcard/Download/Operit/TalkBridge/TalkBridge-xc";
 const REC_DIR = path.join(ROOT, "rec");
 const REP_DIR = path.join(ROOT, "replies");
 const META = path.join(ROOT, "voicegate.json");
@@ -199,10 +199,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // ---- 通话页面（前端 WebView 直接加载）----
+  // ---- 封面图（开源海报页，临时静态路由）----
+  if (p === "/cover.html" && req.method === "GET") {
+    const page = path.join(__dirname, "cover.html");
+    return sendFile(res, page, "text/html; charset=utf-8");
+  }
+
+  // ---- 通话页面（前端 WebView 直接加载，模板化：partner 名字可配置）----
   if (p === "/phone" && req.method === "GET") {
     const page = path.join(__dirname, "phone.html");
-    return sendFile(res, page, "text/html; charset=utf-8");
+    let html;
+    try { html = fs.readFileSync(page, "utf8"); } catch (e) { return send(res, 500, { ok: false, error: "phone page missing" }); }
+    // 部署者配置：环境变量 PARTNER_NAME 优先，否则读同目录 partner_name.txt（默认阿澈）
+    let partner = process.env.PARTNER_NAME || "";
+    if (!partner) {
+      try { partner = fs.readFileSync(path.join(__dirname, "partner_name.txt"), "utf8").trim(); } catch (e) {}
+    }
+    if (!partner) partner = "阿澈";
+    const partnerChar = (partner || "AI").trim().charAt(0);
+    html = html
+      .replace(/阿澈/g, partner)
+      .replace(/<div class="avatar">澈<\/div>/, '<div class="avatar">' + partnerChar + '</div>');
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache", "Expires": "0" });
+    return res.end(html);
   }
 
   send(res, 404, { ok: false, error: "no such route: " + p });

@@ -148,11 +148,14 @@ const server = http.createServer((req, res) => {
           const b64 = String(j.audio || "");
           if (b64) {
             const fname = "rep_" + stamp() + "_" + String(Date.now()).slice(-4) + ".mp3";
-            fs.writeFileSync(path.join(REP_DIR, fname), Buffer.from(b64, "base64"));
+            const audio = Buffer.from(b64, "base64");
+            // 自愈：base64 解码为空/异常直接拒绝，不让 0 字节文件进播放队列
+            if (audio.length < 100) return send(res, 400, { ok: false, error: "audio decode empty" });
+            fs.writeFileSync(path.join(REP_DIR, fname), audio);
             const meta = readMeta();
             meta.replies.push({ id: Date.now().toString(), text, file: fname, at: now() });
             writeMeta(meta);
-            return send(res, 200, { ok: true, file: fname });
+            return send(res, 200, { ok: true, file: fname, size: audio.length });
           }
           return send(res, 400, { ok: false, error: "no audio" });
         }

@@ -204,16 +204,36 @@ def tts(text):
     return out
 
 def post_reply(text, mp3):
-    with open(mp3, "rb") as f:
-        audio_b64 = base64.b64encode(f.read()).decode()
-    payload = json.dumps({"text": text, "audio": audio_b64}).encode()
-    req = urllib.request.Request(
-        GATEWAY + "/reply",
-        data=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read().decode()[:120]
+    """投递回复到网关；写后自校验，文件为空自动重试（最多3次）"""
+    last = ""
+    for attempt in range(3):
+        with open(mp3, "rb") as f:
+            audio_b64 = base64.b64encode(f.read()).decode()
+        payload = json.dumps({"text": text, "audio": audio_b64}).encode()
+        req = urllib.request.Request(
+            GATEWAY + "/reply",
+            data=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                last = resp.read().decode()[:200]
+            # 校验落盘文件非空（防止 0 字节空文件播放"断音"）
+            try:
+                fname = json.loads(last).get("file", "")
+                if fname:
+                    chk = urllib.request.urlopen(GATEWAY + "/reply/" + fname, timeout=10)
+                    head = chk.read(100)
+                    if len(head) > 10:
+                        return last
+            except Exception:
+                pass
+            log(f"投递校验失败(可能空文件), 重试 {attempt+1}/3")
+            time.sleep(1)
+        except Exception as e:
+            log("投递异常(重试%d/3): %s" % (attempt + 1, e))
+            time.sleep(1)
+    return last
 
 def log_session(user_text, reply_text):
     """把一轮对话追加进当前会话档案"""
